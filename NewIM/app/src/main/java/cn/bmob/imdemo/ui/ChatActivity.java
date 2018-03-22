@@ -567,6 +567,7 @@ public class ChatActivity extends ParentWithNaviActivity implements ObseverListe
         File file = new File(dir, String.valueOf(System.currentTimeMillis())
                 + ".jpg");
         localCameraPath = file.getPath();
+        Logger.d("localCameraPath:" + localCameraPath);
         Uri imageUri = Uri.fromFile(file);
         openCameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, imageUri);
         startActivityForResult(openCameraIntent,
