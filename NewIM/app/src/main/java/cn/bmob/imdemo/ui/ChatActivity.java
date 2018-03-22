@@ -1,9 +1,14 @@
 package cn.bmob.imdemo.ui;
 
+import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.provider.MediaStore;
 import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
@@ -28,6 +33,7 @@ import android.widget.Toast;
 
 import com.orhanobut.logger.Logger;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,10 +44,12 @@ import cn.bmob.imdemo.R;
 import cn.bmob.imdemo.adapter.ChatAdapter;
 import cn.bmob.imdemo.adapter.OnRecyclerViewListener;
 import cn.bmob.imdemo.base.ParentWithNaviActivity;
+import cn.bmob.imdemo.util.BmobConstants;
 import cn.bmob.imdemo.util.Util;
 import cn.bmob.newim.BmobIM;
 import cn.bmob.newim.bean.BmobIMAudioMessage;
 import cn.bmob.newim.bean.BmobIMConversation;
+import cn.bmob.newim.bean.BmobIMFileMessage;
 import cn.bmob.newim.bean.BmobIMImageMessage;
 import cn.bmob.newim.bean.BmobIMLocationMessage;
 import cn.bmob.newim.bean.BmobIMMessage;
@@ -110,6 +118,8 @@ public class ChatActivity extends ParentWithNaviActivity implements ObseverListe
     ChatAdapter adapter;
     protected LinearLayoutManager layoutManager;
     BmobIMConversation c;
+
+    private String localCameraPath = "";// 拍照后得到的图片地址
 
     @Override
     protected String title() {
@@ -385,6 +395,12 @@ public class ChatActivity extends ParentWithNaviActivity implements ObseverListe
             }
         }
     }
+
+    private void resetLayout() {
+        layout_more.setVisibility(View.GONE);
+        layout_add.setVisibility(View.VISIBLE);
+        showSoftInputView();
+    }
     @OnClick(R.id.btn_chat_voice)
     public void onVoiceClick(View view){
         edit_msg.setVisibility(View.GONE);
@@ -407,13 +423,11 @@ public class ChatActivity extends ParentWithNaviActivity implements ObseverListe
 
     @OnClick(R.id.tv_picture)
     public void onPictureClick(View view){
-//        sendLocalImageMessage();
-//        sendOtherMessage();
-        sendVideoMessage();
+        selectImageFromLocal();
     }
     @OnClick(R.id.tv_camera)
     public void onCameraClick(View view){
-        sendRemoteImageMessage();
+        selectImageFromCamera();
     }
 
     @OnClick(R.id.tv_location)
@@ -485,13 +499,19 @@ public class ChatActivity extends ParentWithNaviActivity implements ObseverListe
     /**
      * 发送本地图片地址
      */
-    public void sendLocalImageMessage(){
+    public void sendLocalImageMessage(String path){
         //正常情况下，需要调用系统的图库或拍照功能获取到图片的本地地址，开发者只需要将本地的文件地址传过去就可以发送文件类型的消息
-        BmobIMImageMessage image =new BmobIMImageMessage("/storage/emulated/0/bimagechooser/IMG_20160302_172003.jpg");
+        BmobIMImageMessage image =new BmobIMImageMessage(path);
         c.sendMessage(image, listener);
 //        //因此也可以使用BmobIMFileMessage来发送文件消息
 //        BmobIMFileMessage file =new BmobIMFileMessage("文件地址");
 //        c.sendMessage(file,listener);
+    }
+
+    public void sendFile(String path) {
+        Logger.d("file path:" + path);
+        BmobIMFileMessage file =new BmobIMFileMessage(path);
+        c.sendMessage(file,listener);
     }
 
     /**
@@ -531,6 +551,85 @@ public class ChatActivity extends ParentWithNaviActivity implements ObseverListe
         location.setExtraMap(map);
         c.sendMessage(location, listener);
     }
+
+    /**
+     * 启动相机拍照 startCamera
+     *
+     * @Title: startCamera
+     * @throws
+     */
+    public void selectImageFromCamera() {
+        Intent openCameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        File dir = new File(BmobConstants.BMOB_PICTURE_PATH);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        File file = new File(dir, String.valueOf(System.currentTimeMillis())
+                + ".jpg");
+        localCameraPath = file.getPath();
+        Uri imageUri = Uri.fromFile(file);
+        openCameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, imageUri);
+        startActivityForResult(openCameraIntent,
+                BmobConstants.REQUESTCODE_TAKE_CAMERA);
+    }
+
+    /**
+     * 选择图片
+     * @Title: selectImage
+     * @Description: TODO
+     * @param
+     * @return void
+     * @throws
+     */
+    public void selectImageFromLocal() {
+        Intent intent;
+        if (Build.VERSION.SDK_INT < 19) {
+            intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("image/*");
+        } else {
+            intent = new Intent(
+                    Intent.ACTION_PICK,
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+        }
+        startActivityForResult(intent, BmobConstants.REQUESTCODE_TAKE_LOCAL);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        resetLayout();
+        if (resultCode == RESULT_OK) {
+            switch (requestCode) {
+                case BmobConstants.REQUESTCODE_TAKE_CAMERA:// 当取到值的时候才上传path路径下的图片到服务器
+                    Logger.d("本地图片的地址：" + localCameraPath);
+//                    sendFile(localCameraPath);
+                    sendLocalImageMessage(localCameraPath);
+                    break;
+                case BmobConstants.REQUESTCODE_TAKE_LOCAL:
+                    if (data != null) {
+                        Uri selectedImage = data.getData();
+                        if (selectedImage != null) {
+                            Cursor cursor = getContentResolver().query(
+                                    selectedImage, null, null, null, null);
+                            cursor.moveToFirst();
+                            int columnIndex = cursor.getColumnIndex("_data");
+                            String path = cursor.getString(columnIndex);
+                            cursor.close();
+                            if (path == null
+                                    || path.equals("null")) {
+                                toast("找不到您想要的图片");
+                                return;
+                            }
+                            sendLocalImageMessage(path);
+                        }
+                    }
+                    break;
+                case BmobConstants.REQUESTCODE_TAKE_LOCATION:// 地理位置
+                    break;
+            }
+        }
+    }
+
 
     /**
      * 消息发送监听器
